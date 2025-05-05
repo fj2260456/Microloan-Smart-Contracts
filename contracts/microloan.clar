@@ -260,3 +260,178 @@
     )
   )
 )
+
+
+(define-public (get-loan-status (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (status (get status loan))
+    )
+    (ok status)
+  )
+)
+(define-public (get-loan-collateral (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (collateral (get collateral loan))
+    )
+    (ok collateral)
+  )
+)
+(define-public (get-loan-amount (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (amount (get amount loan))
+    )
+    (ok amount)
+  )
+)
+(define-public (get-loan-borrower (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (borrower (get borrower loan))
+    )
+    (ok borrower)
+  )
+)
+(define-public (get-loan-lender (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (lender (unwrap! (get lender loan) err-loan-not-active))
+    )
+    (ok lender)
+  )
+)
+
+
+(define-constant err-extension-exists (err u114))
+(define-constant err-invalid-extension (err u115))
+
+(define-map loan-extensions 
+  { loan-id: uint }
+  { 
+    requested-blocks: uint,
+    status: (string-ascii 10)
+  }
+)
+
+(define-public (request-extension (loan-id uint) (additional-blocks uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (borrower (get borrower loan))
+      (status (get status loan))
+    )
+    (asserts! (is-eq tx-sender borrower) err-unauthorized)
+    (asserts! (is-eq status "ACTIVE") err-loan-not-active)
+    (asserts! (> additional-blocks u0) err-invalid-extension)
+    (asserts! (is-none (map-get? loan-extensions { loan-id: loan-id })) err-extension-exists)
+
+    (map-set loan-extensions
+      { loan-id: loan-id }
+      {
+        requested-blocks: additional-blocks,
+        status: "PENDING"
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (approve-extension (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (extension (unwrap! (map-get? loan-extensions { loan-id: loan-id }) err-not-found))
+      (lender (unwrap! (get lender loan) err-loan-not-active))
+      (current-due (unwrap! (get due-at loan) err-loan-not-active))
+    )
+    (asserts! (is-eq tx-sender lender) err-unauthorized)
+    (asserts! (is-eq (get status extension) "PENDING") err-not-found)
+
+    (map-set loans
+      { loan-id: loan-id }
+      (merge loan {
+        due-at: (some (+ current-due (get requested-blocks extension)))
+      })
+    )
+
+    (map-set loan-extensions
+      { loan-id: loan-id }
+      (merge extension { status: "APPROVED" })
+    )
+    (ok true)
+  )
+)
+
+
+(define-constant err-invalid-refinance (err u116))
+
+(define-map refinance-requests
+  { loan-id: uint }
+  {
+    new-amount: uint,
+    new-duration: uint,
+    new-interest-rate: uint,
+    status: (string-ascii 10)
+  }
+)
+
+(define-public (request-refinance (loan-id uint) (new-amount uint) (new-duration uint) (new-interest-rate uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (borrower (get borrower loan))
+      (status (get status loan))
+    )
+    (asserts! (is-eq tx-sender borrower) err-unauthorized)
+    (asserts! (is-eq status "ACTIVE") err-loan-not-active)
+    (asserts! (> new-amount u0) err-invalid-amount)
+    (asserts! (> new-duration u0) err-invalid-duration)
+    (asserts! (<= new-interest-rate u100) err-invalid-rate)
+
+    (map-set refinance-requests
+      { loan-id: loan-id }
+      {
+        new-amount: new-amount,
+        new-duration: new-duration,
+        new-interest-rate: new-interest-rate,
+        status: "PENDING"
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (approve-refinance (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (refinance (unwrap! (map-get? refinance-requests { loan-id: loan-id }) err-not-found))
+      (lender (unwrap! (get lender loan) err-loan-not-active))
+    )
+    (asserts! (is-eq tx-sender lender) err-unauthorized)
+    (asserts! (is-eq (get status refinance) "PENDING") err-not-found)
+
+    (map-set loans
+      { loan-id: loan-id }
+      (merge loan {
+        amount: (get new-amount refinance),
+        duration: (get new-duration refinance),
+        interest-rate: (get new-interest-rate refinance),
+        due-at: (some (+ stacks-block-height (get new-duration refinance)))
+      })
+    )
+
+    (map-set refinance-requests
+      { loan-id: loan-id }
+      (merge refinance { status: "APPROVED" })
+    )
+    (ok true)
+  )
+)
