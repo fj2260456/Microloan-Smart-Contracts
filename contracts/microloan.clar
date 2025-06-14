@@ -11,6 +11,9 @@
 (define-constant err-loan-not-active (err u105))
 (define-constant err-insufficient-collateral (err u106))
 (define-constant err-loan-not-due (err u107))
+(define-constant err-no-matches (err u117))
+(define-constant err-match-exists (err u118))
+(define-constant err-invalid-criteria (err u119))
 (define-constant err-loan-past-due (err u108))
 (define-constant err-invalid-amount (err u109))
 (define-constant err-invalid-duration (err u110))
@@ -436,5 +439,164 @@
       (merge refinance { status: "APPROVED" })
     )
     (ok true)
+  )
+)
+
+
+
+(define-map lender-preferences
+  { lender: principal }
+  {
+    max-amount: uint,
+    min-interest-rate: uint,
+    max-duration: uint,
+    min-reputation-score: uint,
+    auto-fund: bool
+  }
+)
+
+(define-map loan-matches
+  { loan-id: uint }
+  {
+    matched-lenders: (list 10 principal),
+    match-scores: (list 10 uint),
+    best-match: (optional principal)
+  }
+)
+
+(define-data-var matching-enabled bool true)
+
+(define-public (set-lender-preferences (max-amount uint) (min-interest-rate uint) (max-duration uint) (min-reputation-score uint) (auto-fund bool))
+  (begin
+    (asserts! (> max-amount u0) err-invalid-amount)
+    (asserts! (<= min-interest-rate u100) err-invalid-rate)
+    (asserts! (> max-duration u0) err-invalid-duration)
+    (asserts! (<= min-reputation-score u100) err-invalid-rate)
+    
+    (map-set lender-preferences
+      { lender: tx-sender }
+      {
+        max-amount: max-amount,
+        min-interest-rate: min-interest-rate,
+        max-duration: max-duration,
+        min-reputation-score: min-reputation-score,
+        auto-fund: auto-fund
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (find-loan-matches (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (borrower (get borrower loan))
+      (amount (get amount loan))
+      (interest-rate (get interest-rate loan))
+      (duration (get duration loan))
+      (borrower-rep (get score (get-reputation borrower)))
+      (status (get status loan))
+    )
+    (asserts! (is-eq status "PENDING") err-loan-not-active)
+    (asserts! (var-get matching-enabled) err-unauthorized)
+    
+    (let
+      (
+        (match-result (find-compatible-lenders amount interest-rate duration borrower-rep))
+      )
+      (map-set loan-matches
+        { loan-id: loan-id }
+        {
+          matched-lenders: (get lenders match-result),
+          match-scores: (get scores match-result),
+          best-match: (get best-lender match-result)
+        }
+      )
+      (ok match-result)
+    )
+  )
+)
+
+(define-public (auto-fund-matched-loan (loan-id uint))
+  (let
+    (
+      (loan (unwrap! (get-loan loan-id) err-not-found))
+      (matches (unwrap! (map-get? loan-matches { loan-id: loan-id }) err-no-matches))
+      (best-lender (unwrap! (get best-match matches) err-no-matches))
+      (lender-prefs (unwrap! (map-get? lender-preferences { lender: best-lender }) err-not-found))
+    )
+    (asserts! (is-eq tx-sender best-lender) err-unauthorized)
+    (asserts! (get auto-fund lender-prefs) err-unauthorized)
+    (asserts! (is-eq (get status loan) "PENDING") err-loan-not-active)
+    
+    (fund-loan loan-id)
+  )
+)
+
+(define-public (get-loan-matches (loan-id uint))
+  (match (map-get? loan-matches { loan-id: loan-id })
+    matches (ok matches)
+    err-no-matches
+  )
+)
+
+(define-public (get-lender-preferences (lender principal))
+  (match (map-get? lender-preferences { lender: lender })
+    prefs (ok prefs)
+    err-not-found
+  )
+)
+
+(define-public (toggle-matching (enabled bool))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (ok (var-set matching-enabled enabled))
+  )
+)
+
+(define-private (find-compatible-lenders (amount uint) (interest-rate uint) (duration uint) (borrower-reputation uint))
+  (let
+    (
+      (sample-lenders (list tx-sender))
+      (empty-scores (list u0))
+    )
+    {
+      lenders: sample-lenders,
+      scores: empty-scores,
+      best-lender: (some tx-sender)
+    }
+  )
+)
+
+(define-private (calculate-match-score (lender-prefs (tuple (max-amount uint) (min-interest-rate uint) (max-duration uint) (min-reputation-score uint) (auto-fund bool))) (loan-amount uint) (loan-interest uint) (loan-duration uint) (borrower-rep uint))
+  (let
+    (
+      (amount-score (if (<= loan-amount (get max-amount lender-prefs)) u25 u0))
+      (interest-score (if (>= loan-interest (get min-interest-rate lender-prefs)) u25 u0))
+      (duration-score (if (<= loan-duration (get max-duration lender-prefs)) u25 u0))
+      (reputation-score (if (>= borrower-rep (get min-reputation-score lender-prefs)) u25 u0))
+    )
+    (+ amount-score interest-score duration-score reputation-score)
+  )
+)
+
+(define-read-only (is-matching-enabled)
+  (var-get matching-enabled)
+)
+
+(define-public (remove-lender-preferences)
+  (begin
+    (map-delete lender-preferences { lender: tx-sender })
+    (ok true)
+  )
+)
+
+(define-public (get-compatible-loans-for-lender)
+  (let
+    (
+      (lender-prefs (unwrap! (map-get? lender-preferences { lender: tx-sender }) err-not-found))
+    )
+    (ok lender-prefs)
   )
 )
