@@ -13,6 +13,14 @@ epoch = 3.1
 path = 'contracts/loan-marketplace.clar'
 clarity_version = 3
 epoch = 3.1
+[contracts.risk-assessment]
+path = 'contracts/risk-assessment.clar'
+clarity_version = 3
+epoch = 3.1
+[contracts.loan-performance-tracker]
+path = 'contracts/loan-performance-tracker.clar'
+clarity_version = 3
+epoch = 3.1
 [repl.analysis]
 passes = ['check_checker']
 
