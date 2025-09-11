@@ -1,0 +1,31 @@
+[project]
+name = 'microloan'
+description = ''
+authors = []
+telemetry = true
+cache_dir = '.\.cache'
+requirements = []
+[contracts.microloan]
+path = 'contracts/microloan.clar'
+clarity_version = 3
+epoch = 3.1
+[contracts.loan-marketplace]
+path = 'contracts/loan-marketplace.clar'
+clarity_version = 3
+epoch = 3.1
+[contracts.risk-assessment]
+path = 'contracts/risk-assessment.clar'
+clarity_version = 3
+epoch = 3.1
+[contracts.loan-performance-tracker]
+path = 'contracts/loan-performance-tracker.clar'
+clarity_version = 3
+epoch = 3.1
+[repl.analysis]
+passes = ['check_checker']
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
